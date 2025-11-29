@@ -41,6 +41,9 @@ data GameState = GameState
   , bullets     :: [Bullet]         -- todas las balas activas
   , shootTimer  :: Float            -- tiempo desde último disparo automático
   , playerDir   :: (Float, Float)   -- dirección a la que el jugador quiere ir
+  , playerHP    :: Float            -- vida del jugador en algún momento
+  , playerMaxHP :: Float            -- vida máxima del jugador
+  , gameOver    :: Bool             -- variable determinar continuidad de la partida
   } deriving Show
 
 -- Estado inicial del juego
@@ -53,6 +56,9 @@ initialState = GameState
   , bullets     = []
   , shootTimer  = 0
   , playerDir = (0, 0)
+  , playerHP = 100
+  , playerMaxHP = 100
+  , gameOver = False
   }
 
 -- ============================================================
@@ -78,10 +84,10 @@ enemySpeed :: Float
 enemySpeed = 40    -- velocidad con que los enemigos persiguen al jugador
 
 bulletSpeed :: Float
-bulletSpeed = 250  -- velocidad de las balas
+bulletSpeed = 150  -- velocidad de las balas
 
 shootInterval :: Float
-shootInterval = 0.5 -- cada cuánto dispara el jugador automáticamente
+shootInterval = 1 -- cada cuánto dispara el jugador automáticamente
 
 -- ============================================================
 -- 3. MOVIMIENTO DEL JUGADOR
@@ -135,9 +141,9 @@ spawnEnemiesProgressively :: State GameState ()
 spawnEnemiesProgressively = do
   GameState{..} <- get
 
-  let maxTime      = 180      -- 3 minutos
-      minInterval  = 0.4      -- intervalo más rápido
-      maxInterval  = 3.0      -- intervalo más lento
+  let maxTime      = 1.5      -- 3 minutos
+      minInterval  = 0.5      -- intervalo más rápido
+      maxInterval  = 2.3      -- intervalo más lento
 
       progress        = min 1 (elapsedTime / maxTime)
       currentInterval = maxInterval - progress * (maxInterval - minInterval)
@@ -251,15 +257,15 @@ killCollision = do
 
   let hitRange = enemyRadius + bulletRadius
 
-      -- enemigos que NO fueron golpeados
-      enemiesSurvivors =
+  -- enemigos que NO fueron golpeados
+  let enemiesSurvivors =
         [ e
         | e@(Enemy epos) <- enemies
         , all (\(Bullet bpos _) -> dist epos bpos >= hitRange) bullets
         ]
 
-      -- balas que NO golpearon a ningún enemigo
-      bulletsSurvivors =
+  -- balas que NO golpearon a ningún enemigo
+  let bulletsSurvivors =
         [ b
         | b@(Bullet bpos _) <- bullets
         , all (\(Enemy epos) -> dist epos bpos >= hitRange) enemies
@@ -268,6 +274,39 @@ killCollision = do
   put GameState
     { enemies = enemiesSurvivors
     , bullets = bulletsSurvivors
+    , ..
+    }
+
+
+-- colisión entre el jugador y enemigos (casi igual al anterior)
+deathCollision :: State GameState ()
+deathCollision = do
+  GameState{..} <- get
+
+  let hitRange = playerRadius + enemyRadius
+
+      collided =
+        [ e
+        | e@(Enemy epos) <- enemies
+        , dist playerPos epos < hitRange
+        ]
+
+      enemiesSurvivors =
+        [ e
+        | e@(Enemy epos) <- enemies
+        , dist playerPos epos >= hitRange
+        ]
+
+      -- el jugador pierde 10 de vida por cada enemigo con el que haya chocado
+      damage = 10 * fromIntegral (length collided)
+      newHP  = max 0 (playerHP - damage)
+      
+      isGameOver = newHP <= 0
+
+  put GameState
+    { enemies = enemiesSurvivors
+    , playerHP = newHP
+    , gameOver = isGameOver
     , ..
     }
 
@@ -301,16 +340,18 @@ moveBullets dt = do
 -- updateGame usa State para modificar el estado paso a paso
 updateGame :: Float -> State GameState ()
 updateGame dt = do
-  updateTimers dt
+  GameState{..} <- get
+  when gameOver $ return ()
 
+  updateTimers dt
   GameState{playerDir = (dx, dy)} <- get
   movePlayer (dx * playerSpeed, dy * playerSpeed)
-
   spawnEnemiesProgressively
   autoShoot
   moveBullets dt
   moveEnemies dt
   killCollision
+  deathCollision
 
 -- función update exigida por Gloss
 update :: Float -> GameState -> GameState
@@ -321,13 +362,60 @@ update dt gs = execState (updateGame dt) gs
 -- ============================================================
 
 render :: GameState -> Picture
-render GameState{..} =
-  Pictures $
-    [ translate 0 0 (color white mapPicture)                  -- mapa
-    , uncurry translate playerPos (color green playerPicture) -- jugador
+render gs@GameState{..}
+  | gameOver = gameOverScreen gs
+  | otherwise =
+      Pictures $
+        [ translate 0 0 (color white mapPicture)                  -- mapa
+        , uncurry translate playerPos (color green playerPicture) -- jugador
+        , drawHPBar playerHP playerMaxHP                          -- barra de vida
+        ]
+        ++ map drawEnemy enemies                                  -- enemigos
+        ++ map drawBullet bullets                                 -- balas
+
+-- Dibuja barra de vida del jugador
+drawHPBar :: Float -> Float -> Picture
+drawHPBar hp maxHP =
+  let width    = 200
+      height   = 20
+      hpWidth  = (hp / maxHP) * width
+      hpText   = "HP " ++ show (round hp) ++ "/" ++ show (round maxHP)
+  in translate 0 330 $ Pictures
+       [ -- Texto encima de la barra
+         translate (-75) (20) $
+           scale 0.15 0.15 $
+             color white (Text hpText)
+  
+         -- Fondo de la barra
+       , color (greyN 0.3) (rectangleSolid width height)
+
+         -- Barra roja de vida
+       , color red (rectangleSolid hpWidth height)
+       ]
+
+-- pantalla de game over
+gameOverScreen :: GameState -> Picture
+gameOverScreen GameState{elapsedTime} =
+  Pictures
+    [ -- Texto principal
+      translate (-150) 50 $
+        scale 0.5 0.5 $
+          color red $
+            text "GAME OVER"
+
+      -- Texto parpadeando
+    , blinkText elapsedTime
     ]
-    ++ map drawEnemy enemies                                  -- enemigos
-    ++ map drawBullet bullets                                 -- balas
+
+-- para parpadeo de texto
+blinkText :: Float -> Picture
+blinkText t =
+  let alpha = (sin (t * 4) + 1) / 2       -- oscila entre 0 y 1
+      fadeColor = makeColor 1 1 1 alpha   -- blanco con opacidad variable
+  in translate (-210) (-40) $
+       scale 0.3 0.3 $
+         color fadeColor $
+           text "Presione 'R' para reiniciar"
 
 -- Dibuja un enemigo como círculo rojo
 drawEnemy :: Enemy -> Picture
@@ -380,6 +468,8 @@ handleEvent event gs@GameState{playerDir = (dx, dy)} =
 
     EventKey (SpecialKey KeyLeft) Down _ _  -> gs {playerDir = (-1, dy)}  --izquierda
     EventKey (SpecialKey KeyLeft) Up   _ _  -> gs {playerDir = (0, dy)}
+
+    EventKey (Char 'r') Down _ _ | gameOver gs -> initialState            -- reinicia con 'r' en game over
 
     _ -> gs
 
