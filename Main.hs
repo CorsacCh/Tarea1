@@ -135,7 +135,7 @@ halfMapSize :: Float
 halfMapSize = 200  -- tamaño del mapa (cuadrado)
 
 playerSpeed :: Float
-playerSpeed = 10   -- rapidez de movimiento por tecla
+playerSpeed = 5   -- rapidez de movimiento por tecla
 
 playerRadius :: Float
 playerRadius = 10  -- tamaño del jugador (triángulo)
