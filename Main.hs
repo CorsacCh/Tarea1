@@ -400,7 +400,7 @@ render gs@GameState{..} =
 renderMenu :: GameState -> Picture
 renderMenu GameState{elapsedTime} =
   Pictures
-    [ translate (-180) 100  $ scale 0.4 0.4 $ color white $ text "MAGUITO DE BATALLA"
+    [ translate (-280) 100  $ scale 0.4 0.4 $ color violet $ text "MAGUITO DE BATALLA"
     , translate (-160) 20   $ scale 0.25 0.25 $ color white $ text "1) Iniciar Partida"
     , translate (-160) (-40) $ scale 0.25 0.25 $ color white $ text "2) Instrucciones"
     , translate (-160) (-100) $ scale 0.25 0.25 $ color white $ text "3) Salir"
@@ -411,7 +411,7 @@ renderMenu GameState{elapsedTime} =
 blinkKey :: Float -> Picture
 blinkKey t =
   let alpha = (sin (t * 3) + 1) / 2
-      c = makeColor 1 1 1 alpha
+      c = yellow
   in translate (-200) (-200) $
        scale 0.2 0.2 $
          color c $
@@ -421,11 +421,13 @@ blinkKey t =
 renderInstructions :: GameState -> Picture
 renderInstructions _ =
   Pictures
-    [ translate (-300) 200 $ scale 0.3 0.3 $ color white $ text "Instrucciones:"
-    , translate (-300) 150 $ scale 0.2 0.2 $ color white $ text "- Flechas direccionales: Moverse"
-    , translate (-300) 110 $ scale 0.2 0.2 $ color white $ text "- Maguito dispara solo hacia el enemigo mas cercano"
-    , translate (-300) 70  $ scale 0.2 0.2 $ color white $ text "- Evita ser tocado por los enemigos"
-    , translate (-300) (-50) $ scale 0.2 0.2 $ color yellow $ text "Presiona 'B' para volver al menu"
+    [ translate (-300) 200 $ scale 0.3 0.3 $ color blue $ text "Instrucciones:"
+    , translate (-300) 150 $ scale 0.2 0.2 $ color white $ text "- Flechas direccionales: Mover a Maguito"
+    , translate (-300) 110 $ scale 0.2 0.2 $ color white $ text "- Maguito auto-dispara al enemigo mas cercano"
+    , translate (-300) 70  $ scale 0.2 0.2 $ color white $ text "- ¡Que los enemigos no toquen a Maguito"
+    , translate (-300) 30  $ scale 0.2 0.2 $ color white $ text "- Obten objetos para potenciar a Maguito"
+    , translate (-300) (-100) $ scale 0.2 0.2 $ color red $ text "MAGUITO."
+    , translate (-300) (-300) $ scale 0.2 0.2 $ color yellow $ text "Presiona 'B' para volver al menu"
     ]
 
 renderPlaying :: GameState -> Picture
