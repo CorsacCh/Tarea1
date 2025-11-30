@@ -6,8 +6,9 @@
 
 ## Contenido
 
-* `main.hs`: código completo del juego.
-* Assets: no requiere externos más allá de la librería Gloss.
+* `main.hs`: Código completo del juego.
+* `Makefile`: Herramienta para compilación del juego
+* Assets: No requiere externos más allá de la librería Gloss.
 * Se implementa todo el juego usando **Monad State** para actualizar el estado de manera segura y funcional.
 
 ---
@@ -17,13 +18,12 @@
 * Mover a Maguito usando las flechas del teclado.
 * Evitar que los enemigos toquen a Maguito.
 * Sobrevivir el mayor tiempo posible mientras el puntaje aumenta por cada enemigo eliminado.
-* Disfrutar del spawn progresivo de enemigos y el disparo automático hacia el más cercano.
 
 ---
 
 ## Controles
 
-* **Flechas ↑ ↓ ← →**: Mover al jugador.
+* **Flechas direccionales**: Mover al jugador.
 * **En el menú**:
 
   * `1`: Iniciar partida.
@@ -57,8 +57,8 @@
 
 ### Colisiones
 
-* **Bala vs Enemigo**: Si la distancia es menor que la suma de los radios (`bulletRadius + enemyRadius`), se elimina el enemigo y la bala.
-* **Jugador vs Enemigo**: El jugador pierde 10 HP por enemigo que lo toque. Si HP ≤ 0, termina la partida.
+* **Bala - Enemigo**: Si la distancia es menor que la suma de los radios (`bulletRadius + enemyRadius`), se elimina el enemigo y la bala.
+* **Jugador - Enemigo**: El jugador pierde 10 HP por enemigo que lo toque. Si HP ≤ 0, termina la partida.
 
 ### Spawn progresivo de enemigos
 
@@ -105,7 +105,7 @@ Esto asegura que **cada frame se modifique el estado de manera pura y secuencial
 
 ---
 
-## Visuales
+## Visuales (a cambiar)
 
 * **Jugador**: triángulo verde.
 * **Enemigos**: círculos rojos.
@@ -119,7 +119,7 @@ Esto asegura que **cada frame se modifique el estado de manera pura y secuencial
 
 1. Instalar Haskell y Gloss.
 
-2. Compilar y correr (hacer uso de `make`).
+2. Compilar y correr (hacer uso de `make` en consola).
 
 3. Disfrutar del juego.
 
