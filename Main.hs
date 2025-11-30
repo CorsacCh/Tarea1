@@ -44,6 +44,7 @@ data GameState = GameState
   , playerHP    :: Float            -- vida del jugador en algún momento
   , playerMaxHP :: Float            -- vida máxima del jugador
   , gameOver    :: Bool             -- variable determinar continuidad de la partida
+  , score       :: Int              -- puntaje conseguido
   } deriving Show
 
 -- Estado inicial del juego
@@ -59,6 +60,7 @@ initialState = GameState
   , playerHP = 100
   , playerMaxHP = 100
   , gameOver = False
+  , score = 0
   }
 
 -- ============================================================
@@ -271,9 +273,13 @@ killCollision = do
         , all (\(Enemy epos) -> dist epos bpos >= hitRange) enemies
         ]
 
+  let kills = length enemies - length enemiesSurvivors
+      puntazos = score + kills
+
   put GameState
     { enemies = enemiesSurvivors
     , bullets = bulletsSurvivors
+    , score = puntazos
     , ..
     }
 
@@ -369,6 +375,8 @@ render gs@GameState{..}
         [ translate 0 0 (color white mapPicture)                  -- mapa
         , uncurry translate playerPos (color green playerPicture) -- jugador
         , drawHPBar playerHP playerMaxHP                          -- barra de vida
+        , drawScore score
+        , drawTimer elapsedTime
         ]
         ++ map drawEnemy enemies                                  -- enemigos
         ++ map drawBullet bullets                                 -- balas
@@ -416,6 +424,19 @@ blinkText t =
        scale 0.3 0.3 $
          color fadeColor $
            text "Presione 'R' para reiniciar"
+
+-- Dibuja el puntaje abajo a la izquierda
+drawScore :: Int -> Picture
+drawScore sc =
+  translate (-350) (-360) $ scale 0.2 0.2 $
+    color white $ text ("Score: " ++ show sc)
+
+-- Dibuja el tiempo abajo a la derecha
+drawTimer :: Float -> Picture
+drawTimer t =
+  let seconds = floor t :: Int          -- para redondear hacia abajo
+  in translate (250) (-360) $ scale 0.2 0.2 $
+       color white $ text ("Time: " ++ show seconds)
 
 -- Dibuja un enemigo como círculo rojo
 drawEnemy :: Enemy -> Picture
