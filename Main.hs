@@ -14,10 +14,7 @@ import Data.Function  (on)
 
 -- Para implementar aleatoriedad
 import System.Random (randomRIO)
-import System.IO.Unsafe (unsafePerformIO)
-
--- Para salir limpiamente
-import System.Exit (exitSuccess)
+import System.IO.Unsafe (unsafeDupablePerformIO)
 
 -- ============================================================
 -- 1. DEFINICIÓN DE TIPOS DE DATOS (ESTADO DEL JUEGO)
@@ -240,7 +237,7 @@ spawnEnemiesProgressively = do
 
 -- Aparición de enemigos en posiciones aleatorias
 randomSpawnPosition :: Float -> (Float, Float)
-randomSpawnPosition prog = unsafePerformIO (do
+randomSpawnPosition prog = unsafeDupablePerformIO (do
   let baseDist = 220
       extraDist = 200 * prog
       d = baseDist + extraDist
@@ -298,7 +295,7 @@ spawnItems = do
     then return ()
     else do
       -- Generamos todo aleatorio aquí mismo
-      let newItem = unsafePerformIO $ do
+      let newItem = unsafeDupablePerformIO $ do
             -- posición aleatoria dentro del mapa (con margen de 20)
             x <- randomRIO (-halfMapSize + 20, halfMapSize - 20)
             y <- randomRIO (-halfMapSize + 20, halfMapSize - 20)
@@ -706,10 +703,12 @@ handleEvent event gs@GameState
     ScreenGameOver ->
       case event of
         EventKey (Char 'r') Down _ _ ->
-            initialState
-              playerUp playerDown playerLeft playerRight
-              enemySprite bulletSprite floorSprite
-              healItemSprite fireRateItemSprite
+          initialState
+            playerUp playerDown playerLeft playerRight
+            enemySprite bulletSprite floorSprite
+            healItemSprite fireRateItemSprite
+
+        _ -> gs
 
     -- para el juego
     ScreenGame ->
@@ -764,6 +763,6 @@ main = do
 
   play window backgroundColor fps initGS render handleEvent (\dt gs ->
       if quit gs
-        then unsafePerformIO exitSuccess `seq` gs
+        then gs {instScreen = ScreenExit}
         else update dt gs
     )
