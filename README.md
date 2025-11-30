@@ -132,4 +132,10 @@ Esto asegura que **cada frame se modifique el estado de manera pura y secuencial
 
 ---
 
+## Autores:
+1. Jorge Cheuquemán.
+2. Cristian Vera.
+
+---
+
 **¡Diviértete defendiendo a Maguito!**
