@@ -16,6 +16,9 @@ import Data.Function  (on)
 import System.Random (randomRIO)
 import System.IO.Unsafe (unsafePerformIO)
 
+-- Para salir limpiamente
+import System.Exit (exitSuccess)
+
 -- ============================================================
 -- 1. DEFINICIÓN DE TIPOS DE DATOS (ESTADO DEL JUEGO)
 -- ============================================================
@@ -31,6 +34,15 @@ data Bullet = Bullet
   , bulletVel :: (Float, Float)
   } deriving Show
 
+-- GameScreen: muestra la pantalla correspondiente para las instancias del juego
+data GameScreen
+  = ScreenMenu          -- pantalla menú (inicial)
+  | ScreenGame          -- pantalla juego (durante la partida)
+  | ScreenInstr         -- pantalla instrucciones (por si acaso)
+  | ScreenGameOver      -- pantalla final (game over / final)
+  | ScreenExit          -- para cerrar (cosas de haskell -.-)
+  deriving (Eq, Show)
+
 -- GameState: contiene TODO el estado del juego
 -- Cada frame modificamos este estado usando la Monad State
 data GameState = GameState
@@ -45,6 +57,8 @@ data GameState = GameState
   , playerMaxHP :: Float            -- vida máxima del jugador
   , gameOver    :: Bool             -- variable determinar continuidad de la partida
   , score       :: Int              -- puntaje conseguido
+  , instScreen  :: GameScreen       -- instancia de la pantalla actual
+  , quit        :: Bool             -- determina si salir o no del juego
   } deriving Show
 
 -- Estado inicial del juego
@@ -61,6 +75,8 @@ initialState = GameState
   , playerMaxHP = 100
   , gameOver = False
   , score = 0
+  , instScreen = ScreenMenu
+  , quit = False
   }
 
 -- ============================================================
@@ -283,7 +299,6 @@ killCollision = do
     , ..
     }
 
-
 -- colisión entre el jugador y enemigos (casi igual al anterior)
 deathCollision :: State GameState ()
 deathCollision = do
@@ -346,9 +361,6 @@ moveBullets dt = do
 -- updateGame usa State para modificar el estado paso a paso
 updateGame :: Float -> State GameState ()
 updateGame dt = do
-  GameState{..} <- get
-  when gameOver $ return ()
-
   updateTimers dt
   GameState{playerDir = (dx, dy)} <- get
   movePlayer (dx * playerSpeed, dy * playerSpeed)
@@ -359,28 +371,91 @@ updateGame dt = do
   killCollision
   deathCollision
 
+  gs@GameState{gameOver} <- get
+  when gameOver $
+    put gs {instScreen = ScreenGameOver}
+
 -- función update exigida por Gloss
 update :: Float -> GameState -> GameState
-update dt gs = execState (updateGame dt) gs
+update dt gs@GameState{instScreen = ScreenGame} =
+  execState (updateGame dt) gs
+
+update _ gs = gs -- no actualiza si no se está jugando
 
 -- ============================================================
--- 10. DIBUJAR PERSONAJE, ENEMIGOS Y BALAS
+-- 10. DIBUJAR PANTALLAS, PERSONAJE, ENEMIGOS Y BALAS
 -- ============================================================
 
+-- filtro del render actual / sistema de selección de pantallas
 render :: GameState -> Picture
-render gs@GameState{..}
+render gs@GameState{..} =
+  case instScreen of
+    ScreenMenu   -> renderMenu gs
+    ScreenInstr  -> renderInstructions gs
+    ScreenGame   -> renderPlaying gs
+    ScreenGameOver -> gameOverScreen gs
+    ScreenExit -> Blank
+
+-- render del menú principal
+renderMenu :: GameState -> Picture
+renderMenu GameState{elapsedTime} =
+  Pictures
+    [ translate (-180) 100  $ scale 0.4 0.4 $ color white $ text "MAGUITO DE BATALLA"
+    , translate (-160) 20   $ scale 0.25 0.25 $ color white $ text "1) Iniciar Partida"
+    , translate (-160) (-40) $ scale 0.25 0.25 $ color white $ text "2) Instrucciones"
+    , translate (-160) (-100) $ scale 0.25 0.25 $ color white $ text "3) Salir"
+    , blinkKey elapsedTime
+    ]
+
+-- parpadeo para opciones (cosmético)
+blinkKey :: Float -> Picture
+blinkKey t =
+  let alpha = (sin (t * 3) + 1) / 2
+      c = makeColor 1 1 1 alpha
+  in translate (-200) (-200) $
+       scale 0.2 0.2 $
+         color c $
+           text "Seleccione con las teclas 1-3"
+
+-- render de las instrucciones
+renderInstructions :: GameState -> Picture
+renderInstructions _ =
+  Pictures
+    [ translate (-300) 200 $ scale 0.3 0.3 $ color white $ text "Instrucciones:"
+    , translate (-300) 150 $ scale 0.2 0.2 $ color white $ text "- Flechas direccionales: Moverse"
+    , translate (-300) 110 $ scale 0.2 0.2 $ color white $ text "- Maguito dispara solo hacia el enemigo mas cercano"
+    , translate (-300) 70  $ scale 0.2 0.2 $ color white $ text "- Evita ser tocado por los enemigos"
+    , translate (-300) (-50) $ scale 0.2 0.2 $ color yellow $ text "Presiona 'B' para volver al menu"
+    ]
+
+renderPlaying :: GameState -> Picture
+renderPlaying gs@GameState{..}
   | gameOver = gameOverScreen gs
   | otherwise =
       Pictures $
-        [ translate 0 0 (color white mapPicture)                  -- mapa
-        , uncurry translate playerPos (color green playerPicture) -- jugador
-        , drawHPBar playerHP playerMaxHP                          -- barra de vida
+        [ translate 0 0 (color white mapPicture)
+        , uncurry translate playerPos (color green playerPicture)
+        , drawHPBar playerHP playerMaxHP
         , drawScore score
         , drawTimer elapsedTime
         ]
-        ++ map drawEnemy enemies                                  -- enemigos
-        ++ map drawBullet bullets                                 -- balas
+        ++ map drawEnemy enemies
+        ++ map drawBullet bullets
 
+-- pantalla de game over
+gameOverScreen :: GameState -> Picture
+gameOverScreen GameState{elapsedTime} =
+  Pictures
+    [ -- Texto principal
+      translate (-150) 50 $
+        scale 0.5 0.5 $
+          color red $
+            text "GAME OVER"
+
+      -- Texto parpadeando
+    , blinkText elapsedTime
+    ]
+    
 -- Dibuja barra de vida del jugador
 drawHPBar :: Float -> Float -> Picture
 drawHPBar hp maxHP =
@@ -400,20 +475,6 @@ drawHPBar hp maxHP =
          -- Barra roja de vida
        , color red (rectangleSolid hpWidth height)
        ]
-
--- pantalla de game over
-gameOverScreen :: GameState -> Picture
-gameOverScreen GameState{elapsedTime} =
-  Pictures
-    [ -- Texto principal
-      translate (-150) 50 $
-        scale 0.5 0.5 $
-          color red $
-            text "GAME OVER"
-
-      -- Texto parpadeando
-    , blinkText elapsedTime
-    ]
 
 -- para parpadeo de texto
 blinkText :: Float -> Picture
@@ -476,23 +537,45 @@ playerPicture =
 -- ============================================================
 
 handleEvent :: Event -> GameState -> GameState
-handleEvent event gs@GameState{playerDir = (dx, dy)} =
-  case event of
-    EventKey (SpecialKey KeyUp) Down _ _    -> gs {playerDir = (dx, 1)}   --arriba
-    EventKey (SpecialKey KeyUp) Up   _ _    -> gs {playerDir = (dx, 0)}
+handleEvent event gs@GameState{instScreen, playerDir = (dx,dy)} =
+  case instScreen of
 
-    EventKey (SpecialKey KeyDown) Down _ _  -> gs {playerDir = (dx, -1)}  --abajo
-    EventKey (SpecialKey KeyDown) Up   _ _  -> gs {playerDir = (dx, 0)}
+    -- pantalla de inicio
+    ScreenMenu ->
+      case event of
+        EventKey (Char '1') Down _ _ -> gs {instScreen = ScreenGame, elapsedTime = 0}
+        EventKey (Char '2') Down _ _ -> gs {instScreen = ScreenInstr}
+        EventKey (Char '3') Down _ _ -> gs {instScreen = ScreenExit}
+        _ -> gs
 
-    EventKey (SpecialKey KeyRight) Down _ _ -> gs {playerDir = (1, dy)}   --derecha
-    EventKey (SpecialKey KeyRight) Up   _ _ -> gs {playerDir = (0, dy)}
+    -- pantalla de instrucciones
+    ScreenInstr ->
+      case event of
+        EventKey (Char 'b') Down _ _ -> gs {instScreen = ScreenMenu}
+        _ -> gs
 
-    EventKey (SpecialKey KeyLeft) Down _ _  -> gs {playerDir = (-1, dy)}  --izquierda
-    EventKey (SpecialKey KeyLeft) Up   _ _  -> gs {playerDir = (0, dy)}
+    -- game over
+    ScreenGameOver ->
+      case event of
+        EventKey (Char 'r') Down _ _ -> initialState
+        _ -> gs
 
-    EventKey (Char 'r') Down _ _ | gameOver gs -> initialState            -- reinicia con 'r' en game over
+    -- para el juego
+    ScreenGame ->
+      case event of --movimientos por tecla
+        EventKey (SpecialKey KeyUp) Down _ _    -> gs {playerDir = (dx, 1)}   -- arriba
+        EventKey (SpecialKey KeyUp) Up   _ _    -> gs {playerDir = (dx, 0)}
 
-    _ -> gs
+        EventKey (SpecialKey KeyDown) Down _ _  -> gs {playerDir = (dx, -1)}  -- abajo
+        EventKey (SpecialKey KeyDown) Up   _ _  -> gs {playerDir = (dx, 0)}
+
+        EventKey (SpecialKey KeyRight) Down _ _ -> gs {playerDir = (1, dy)}   -- derecha
+        EventKey (SpecialKey KeyRight) Up   _ _ -> gs {playerDir = (0, dy)}
+
+        EventKey (SpecialKey KeyLeft) Down _ _  -> gs {playerDir = (-1, dy)}  -- izquierda
+        EventKey (SpecialKey KeyLeft) Up   _ _  -> gs {playerDir = (0, dy)}
+
+        _ -> gs
 
 -- ============================================================
 -- 12. MISCELÁNEA
@@ -508,8 +591,13 @@ dist (x1,y1) (x2,y2) =
 
 main :: IO ()
 main = do
-  let window = InWindow "Bullet Heaven Haskell" (800, 800) (100, 100)
+  let window = InWindow "MAGUITO DE BATALLA" (800, 800) (100, 100)
       backgroundColor = black
       fps = 60
-  play window backgroundColor fps initialState render handleEvent update
+  play window backgroundColor fps initialState render handleEvent (\dt gs ->
+      if quit gs
+        then unsafePerformIO exitSuccess `seq` gs
+        else update dt gs
+    )
+
 
