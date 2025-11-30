@@ -105,12 +105,12 @@ Esto asegura que **cada frame se modifique el estado de manera pura y secuencial
 
 ---
 
-## Visuales (a cambiar)
+## Visuales 
 
-* **Jugador**: triángulo verde.
-* **Enemigos**: círculos rojos.
-* **Balas**: círculos amarillos.
-* **Mapa**: cuadrado delimitando el área de juego.
+* **Jugador**: Maguito, el mago.
+* **Enemigos**: Demonios rojos.
+* **Balas**: Bolas de fuego.
+* **Mapa**: cuadrado delimitando el área de juego, con temática de castillo gótico.
 * **HUD**: barra de vida, puntaje y tiempo.
 
 ---

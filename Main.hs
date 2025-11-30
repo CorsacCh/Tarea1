@@ -9,7 +9,7 @@ import Graphics.Gloss.Interface.Pure.Game
 import Control.Monad.State
 
 -- Para calcular “enemigo más cercano”
-import Data.List      (minimumBy)
+import Data.List      (minimumBy, partition)
 import Data.Function  (on)
 
 -- Para implementar aleatoriedad
@@ -26,6 +26,15 @@ import System.Exit (exitSuccess)
 -- Enemigo: por ahora solo tiene una posición (x,y)
 data Enemy = Enemy
   { enemyPos :: (Float, Float)
+  } deriving Show
+
+-- Tipos de item / power-up: SOLO Heal y FireRate
+data ItemType = Heal | FireRate
+  deriving (Show, Eq)
+
+data Item = Item
+  { itemPos  :: (Float, Float)
+  , itemType :: ItemType
   } deriving Show
 
 -- Bala: tiene posición y velocidad (vx,vy)
@@ -59,25 +68,64 @@ data GameState = GameState
   , score       :: Int              -- puntaje conseguido
   , instScreen  :: GameScreen       -- instancia de la pantalla actual
   , quit        :: Bool             -- determina si salir o no del juego
+
+  -- SPRITES
+  , playerUp             :: Picture -- direccinales para el jugador
+  , playerDown           :: Picture
+  , playerLeft           :: Picture
+  , playerRight          :: Picture
+
+  , enemySprite          :: Picture -- enemigo
+  , bulletSprite         :: Picture -- bala
+  , floorSprite          :: Picture -- suelo
+
+  , items                :: [Item] -- items y asociados
+  , itemSpawnTimer       :: Float
+  , currentShootInterval :: Float
+  , healItemSprite       :: Picture    -- poción (vida)
+  , fireRateItemSprite   :: Picture    -- velocidad de disparo
+
   } deriving Show
 
 -- Estado inicial del juego
-initialState :: GameState
-initialState = GameState
-  { playerPos   = (0, 0)
-  , enemies     = []     -- comenzamos sin enemigos
-  , elapsedTime = 0
-  , spawnTimer  = 0
-  , bullets     = []
-  , shootTimer  = 0
-  , playerDir = (0, 0)
-  , playerHP = 100
-  , playerMaxHP = 100
-  , gameOver = False
-  , score = 0
-  , instScreen = ScreenMenu
-  , quit = False
-  }
+initialState
+  :: Picture -> Picture -> Picture -> Picture  -- playerUp, playerDown, playerLeft, playerRight
+  -> Picture -> Picture -> Picture            -- enemySprite, bulletSprite, floorSprite
+  -> Picture -> Picture                       -- healItemSprite, fireRateItemSprite
+  -> GameState
+
+initialState pUp pDown pLeft pRight enemyImg bulletImg floorImg healImg fireImg =
+  GameState
+    { playerPos   = (0, 0)
+    , enemies     = []     -- comenzamos sin enemigos
+    , elapsedTime = 0
+    , spawnTimer  = 0
+    , bullets     = []
+    , shootTimer  = 0
+    , playerDir = (0, 0)
+    , playerHP = 100
+    , playerMaxHP = 100
+    , gameOver = False
+    , score = 0
+    , instScreen = ScreenMenu
+    , quit = False
+
+    , playerUp    = pUp
+    , playerDown  = pDown
+    , playerLeft  = pLeft
+    , playerRight = pRight
+
+    , enemySprite  = enemyImg
+    , bulletSprite = bulletImg
+    , floorSprite  = floorImg
+
+    , items                = []
+    , itemSpawnTimer       = 0
+    , currentShootInterval = shootInterval
+
+    , healItemSprite     = healImg
+    , fireRateItemSprite = fireImg
+    }
 
 -- ============================================================
 -- 2. PARÁMETROS GENERALES DEL JUEGO
@@ -106,6 +154,19 @@ bulletSpeed = 150  -- velocidad de las balas
 
 shootInterval :: Float
 shootInterval = 1 -- cada cuánto dispara el jugador automáticamente
+
+floorScale :: Float
+floorScale = 6
+
+-- parámetros de items
+itemRadius :: Float
+itemRadius = 6
+
+itemSpawnInterval :: Float
+itemSpawnInterval = 5   -- cada 5 segundos aparece un item
+
+minShootInterval :: Float
+minShootInterval = 0.2  -- límite mínimo de intervalo de disparo
 
 -- ============================================================
 -- 3. MOVIMIENTO DEL JUGADOR
@@ -147,6 +208,7 @@ updateTimers dt = do
     { elapsedTime = elapsedTime + dt
     , spawnTimer  = spawnTimer  + dt
     , shootTimer  = shootTimer + dt
+    , itemSpawnTimer = itemSpawnTimer + dt
     , ..
     }
 
@@ -226,7 +288,40 @@ moveTowards (ex,ey) (px,py) speed dt =
      )
 
 -- ============================================================
--- 7. DISPARO AUTOMÁTICO HACIA EL ENEMIGO MÁS CERCANO
+-- 7. SPAWN DE ITEMS ALEATORIOS (SOLO Heal y FireRate)
+-- ============================================================
+
+spawnItems :: State GameState ()
+spawnItems = do
+  GameState{..} <- get
+  if itemSpawnTimer < itemSpawnInterval
+    then return ()
+    else do
+      -- Generamos todo aleatorio aquí mismo
+      let newItem = unsafePerformIO $ do
+            -- posición aleatoria dentro del mapa (con margen de 20)
+            x <- randomRIO (-halfMapSize + 20, halfMapSize - 20)
+            y <- randomRIO (-halfMapSize + 20, halfMapSize - 20)
+
+            -- tipo aleatorio de item: 1 = Heal, 2 = FireRate
+            n <- randomRIO (1 :: Int, 2)
+            let itype = case n of
+                          1 -> Heal
+                          _ -> FireRate
+
+            pure Item
+              { itemPos  = (x,y)
+              , itemType = itype
+              }
+
+      put GameState
+        { items          = newItem : items
+        , itemSpawnTimer = 0
+        , ..
+        }
+
+-- ============================================================
+-- 8. DISPARO AUTOMÁTICO HACIA EL ENEMIGO MÁS CERCANO
 -- ============================================================
 
 autoShoot :: State GameState ()
@@ -234,7 +329,7 @@ autoShoot = do
   GameState{..} <- get
 
   -- si todavía no ha pasado el intervalo o no hay enemigos, no disparamos
-  if shootTimer < shootInterval || null enemies
+  if shootTimer < currentShootInterval || null enemies
     then return ()
     else case closestEnemy playerPos enemies of
       Nothing -> return ()
@@ -267,6 +362,10 @@ createBulletTowards (px,py) (ex,ey) speed =
        { bulletPos = (px,py)
        , bulletVel = (ux*speed, uy*speed)
        }
+
+-- ============================================================
+-- 9. COLISIONES E INTERACCIÓN ENTRE ENTIDADES
+-- ============================================================
 
 -- colisión entre balas y enemigos
 killCollision :: State GameState ()
@@ -331,8 +430,34 @@ deathCollision = do
     , ..
     }
 
+-- colisión jugador-objeto
+collectItems :: State GameState ()
+collectItems = do
+  GameState{..} <- get
+  let hitRange = playerRadius + itemRadius
+
+      (collected, remaining) =
+        partition (\(Item pos _) -> dist playerPos pos < hitRange) items
+
+      applyItem :: GameState -> Item -> GameState
+      applyItem gs@GameState{..} (Item _ Heal) =
+        gs { playerHP = min playerMaxHP (playerHP + 30) }
+
+      applyItem gs@GameState{..} (Item _ FireRate) =
+        let newInterval = max minShootInterval (currentShootInterval * 0.7)
+        in gs { currentShootInterval = newInterval }
+
+      gs0 = GameState
+              { items = remaining
+              , ..
+              }
+
+      gsFinal = foldl applyItem gs0 collected
+
+  put gsFinal
+
 -- ============================================================
--- 8. MOVIMIENTO DE BALAS
+-- 10. MOVIMIENTO DE BALAS
 -- ============================================================
 
 moveBullets :: Float -> State GameState ()
@@ -355,7 +480,7 @@ moveBullets dt = do
     }
 
 -- ============================================================
--- 9. FUNCIÓN UPDATE GENERAL
+-- 11. FUNCIÓN UPDATE GENERAL
 -- ============================================================
 
 -- updateGame usa State para modificar el estado paso a paso
@@ -365,11 +490,13 @@ updateGame dt = do
   GameState{playerDir = (dx, dy)} <- get
   movePlayer (dx * playerSpeed, dy * playerSpeed)
   spawnEnemiesProgressively
+  spawnItems
   autoShoot
   moveBullets dt
   moveEnemies dt
   killCollision
   deathCollision
+  collectItems
 
   gs@GameState{gameOver} <- get
   when gameOver $
@@ -383,7 +510,7 @@ update dt gs@GameState{instScreen = ScreenGame} =
 update _ gs = gs -- no actualiza si no se está jugando
 
 -- ============================================================
--- 10. DIBUJAR PANTALLAS, PERSONAJE, ENEMIGOS Y BALAS
+-- 12. DIBUJAR PANTALLAS, PERSONAJE, ENEMIGOS Y BALAS (renderización)
 -- ============================================================
 
 -- filtro del render actual / sistema de selección de pantallas
@@ -435,14 +562,14 @@ renderPlaying gs@GameState{..}
   | gameOver = gameOverScreen gs
   | otherwise =
       Pictures $
-        [ translate 0 0 (color white mapPicture)
-        , uncurry translate playerPos (color green playerPicture)
+        [ translate 0 0 (scale floorScale floorScale floorSprite)
+        , translate 0 0 (color white mapPicture)
+        , drawPlayer playerDir playerUp playerDown playerLeft playerRight playerPos
         , drawHPBar playerHP playerMaxHP
-        , drawScore score
-        , drawTimer elapsedTime
         ]
-        ++ map drawEnemy enemies
-        ++ map drawBullet bullets
+        ++ map (drawEnemy enemySprite) enemies
+        ++ map (drawBullet bulletSprite) bullets
+        ++ map (drawItem healItemSprite fireRateItemSprite) items
 
 -- pantalla de game over
 gameOverScreen :: GameState -> Picture
@@ -501,19 +628,34 @@ drawTimer t =
   in translate (250) (-360) $ scale 0.2 0.2 $
        color white $ text ("Time: " ++ show seconds)
 
--- Dibuja un enemigo como círculo rojo
-drawEnemy :: Enemy -> Picture
-drawEnemy (Enemy (x,y)) =
-  translate x y $
-    color red $
-      circleSolid enemyRadius
+drawPlayer
+  :: (Float,Float)
+  -> Picture -> Picture -> Picture -> Picture
+  -> (Float,Float)
+  -> Picture
+drawPlayer (dx,dy) up down left right (px,py)
+  | dy > 0     = translate px py up
+  | dy < 0     = translate px py down
+  | dx < 0     = translate px py left
+  | dx > 0     = translate px py right
+  | otherwise  = translate px py down
 
--- Dibuja una bala como círculo amarillo
-drawBullet :: Bullet -> Picture
-drawBullet (Bullet (x,y) _) =
+drawEnemy :: Picture -> Enemy -> Picture
+drawEnemy sprite (Enemy (x,y)) =
+  translate x y sprite
+
+-- Proyectil SIN rotar: se dibuja tal como viene la imagen
+drawBullet :: Picture -> Bullet -> Picture
+drawBullet sprite (Bullet (x,y) _) =
+  translate x y sprite
+
+-- Dibuja items usando sprites distintos según el tipo
+drawItem :: Picture -> Picture -> Item -> Picture
+drawItem healSprite fireSprite (Item (x,y) itype) =
   translate x y $
-    color yellow $
-      circleSolid bulletRadius
+    case itype of
+      Heal     -> healSprite
+      FireRate -> fireSprite
 
 -- Mapa cuadrado
 mapPicture :: Picture
@@ -525,21 +667,25 @@ mapPicture =
     , ( halfMapSize, -halfMapSize)
     ]
 
--- Triángulo que representa al jugador
-playerPicture :: Picture
-playerPicture =
-  polygon
-    [ ( 0,            playerRadius)
-    , (-playerRadius, -playerRadius)
-    , ( playerRadius, -playerRadius)
-    ]
-
 -- ============================================================
--- 11. EVENTOS DE TECLADO (para movimiento del jugador)
+-- 13. EVENTOS DE TECLADO (para movimiento del jugador) Y CAMBIOS DE PANTALLA
 -- ============================================================
 
 handleEvent :: Event -> GameState -> GameState
-handleEvent event gs@GameState{instScreen, playerDir = (dx,dy)} =
+handleEvent event gs@GameState
+  { instScreen
+  , playerDir = (dx,dy)
+  , playerUp
+  , playerDown
+  , playerLeft
+  , playerRight
+  , enemySprite
+  , bulletSprite
+  , floorSprite
+  , healItemSprite
+  , fireRateItemSprite
+  } =
+
   case instScreen of
 
     -- pantalla de inicio
@@ -559,8 +705,11 @@ handleEvent event gs@GameState{instScreen, playerDir = (dx,dy)} =
     -- game over
     ScreenGameOver ->
       case event of
-        EventKey (Char 'r') Down _ _ -> initialState
-        _ -> gs
+        EventKey (Char 'r') Down _ _ ->
+            initialState
+              playerUp playerDown playerLeft playerRight
+              enemySprite bulletSprite floorSprite
+              healItemSprite fireRateItemSprite
 
     -- para el juego
     ScreenGame ->
@@ -580,7 +729,7 @@ handleEvent event gs@GameState{instScreen, playerDir = (dx,dy)} =
         _ -> gs
 
 -- ============================================================
--- 12. MISCELÁNEA
+-- 14. MISCELÁNEA
 -- ============================================================
 
 dist :: (Float,Float) -> (Float,Float) -> Float
@@ -588,15 +737,32 @@ dist (x1,y1) (x2,y2) =
   sqrt ((x1 - x2)^2 + (y1 - y2)^2)
 
 -- ============================================================
--- 13. MAIN
+-- 15. MAIN
 -- ============================================================
 
 main :: IO ()
 main = do
+  -- Sprites del personaje (4 direcciones)
+  upImg    <- loadBMP "sprites/personaje_1_v1.bmp"
+  downImg  <- loadBMP "sprites/personaje_2_v1.bmp"
+  leftImg  <- loadBMP "sprites/personaje_3_v1.bmp"
+  rightImg <- loadBMP "sprites/personaje_4_v1.bmp"
+
+  enemyImg   <- loadBMP "sprites/enemigo_v1.bmp"
+  bulletImg  <- loadBMP "sprites/proyectil_v1.bmp"
+  floorImg   <- loadBMP "sprites/suelo_v1.bmp"
+  healImg    <- loadBMP "sprites/pocion_v1.bmp"
+  fireRateImg <- loadBMP "sprites/velocidad_disparo_v1.bmp"
+
   let window = InWindow "MAGUITO DE BATALLA" (800, 800) (100, 100)
       backgroundColor = black
       fps = 60
-  play window backgroundColor fps initialState render handleEvent (\dt gs ->
+      initGS = initialState
+                 upImg downImg leftImg rightImg
+                 enemyImg bulletImg floorImg
+                 healImg fireRateImg
+
+  play window backgroundColor fps initGS render handleEvent (\dt gs ->
       if quit gs
         then unsafePerformIO exitSuccess `seq` gs
         else update dt gs
