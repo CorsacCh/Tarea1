@@ -601,5 +601,3 @@ main = do
         then unsafePerformIO exitSuccess `seq` gs
         else update dt gs
     )
-
-
